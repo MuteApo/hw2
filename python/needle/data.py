@@ -1,3 +1,5 @@
+import struct
+import gzip
 import numpy as np
 from .autograd import Tensor
 
@@ -10,7 +12,7 @@ class Transform:
 
 
 class RandomFlipHorizontal(Transform):
-    def __init__(self, p = 0.5):
+    def __init__(self, p=0.5):
         self.p = p
 
     def __call__(self, img):
@@ -22,10 +24,9 @@ class RandomFlipHorizontal(Transform):
             H x W x C ndarray corresponding to image flipped with probability self.p
         Note: use the provided code to provide randomness, for easier testing
         """
+
         flip_img = np.random.rand() < self.p
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        return img[:, ::-1, :] if flip_img else img
 
 
 class RandomCrop(Transform):
@@ -40,10 +41,13 @@ class RandomCrop(Transform):
             H x W x C NAArray of cliped image
         Note: generate the image shifted by shift_x, shift_y specified below
         """
-        shift_x, shift_y = np.random.randint(low=-self.padding, high=self.padding+1, size=2)
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+
+        shift_x, shift_y = np.random.randint(low=-self.padding, high=self.padding + 1, size=2)
+        h, w, c = img.shape
+        output = np.zeros((h + self.padding * 2, w + self.padding * 2, c))
+        output[self.padding:h + self.padding, self.padding:w + self.padding, :] = img[:, :, :]
+        h0, w0 = self.padding + shift_x, self.padding + shift_y
+        return output[h0:h0 + h, w0:w0 + w, :]
 
 
 class Dataset:
@@ -82,6 +86,7 @@ class DataLoader:
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: ``False``).
      """
+
     dataset: Dataset
     batch_size: Optional[int]
 
@@ -100,15 +105,23 @@ class DataLoader:
                                            range(batch_size, len(dataset), batch_size))
 
     def __iter__(self):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        self.batch_id = 0
+        if self.shuffle:
+            indices = list(range(len(self.dataset)))
+            np.random.shuffle(indices)
+            batches = range(self.batch_size, len(self.dataset), self.batch_size)
+            self.ordering = np.array_split(indices, batches)
         return self
 
     def __next__(self):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        if self.batch_id >= len(self.ordering):
+            raise StopIteration
+        mini_batch = []
+        for i in range(len(self.dataset[0])):
+            item = [self.dataset[_][i] for _ in self.ordering[self.batch_id]]
+            mini_batch.append(Tensor(item))
+        self.batch_id += 1
+        return mini_batch
 
 
 class MNISTDataset(Dataset):
@@ -118,19 +131,38 @@ class MNISTDataset(Dataset):
         label_filename: str,
         transforms: Optional[List] = None,
     ):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        self.images, image_num = self.load_image(image_filename)
+        self.labels, label_num = self.load_label(label_filename)
+        assert image_num == label_num, 'image number mismatches label number'
+        self.len = image_num
+        self.transforms = transforms
 
     def __getitem__(self, index) -> object:
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        if isinstance(self.labels[index], Iterable):
+            img = self.images[index].reshape(-1, 28, 28, 1)
+            img = np.array([self.apply_transforms(_).reshape(-1,) for _ in img])
+        else:
+            img = self.apply_transforms(self.images[index].reshape(28, 28, 1)).reshape(-1)
+        return img, self.labels[index]
 
     def __len__(self) -> int:
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        return self.len
+
+    def load_image(self, image_filename):
+        with gzip.open(image_filename, 'rb') as image_file:
+            _, image_num, _, _ = struct.unpack('>IIII', image_file.read(16))
+            images = np.frombuffer(image_file.read(), dtype=np.uint8)
+            images = images.reshape(image_num, 784).astype('float32')
+            image_max, image_min = np.max(images), np.min(images)
+            images = (images - image_min) / (image_max - image_min)
+        return images, image_num
+
+    def load_label(self, label_filename):
+        with gzip.open(label_filename, 'rb') as label_file:
+            _, label_num = struct.unpack('>II', label_file.read(8))
+            labels = np.frombuffer(label_file.read(), dtype=np.uint8)
+        return labels, label_num
+
 
 class NDArrayDataset(Dataset):
     def __init__(self, *arrays):
